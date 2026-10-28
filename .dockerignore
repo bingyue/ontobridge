@@ -1,0 +1,12 @@
+.git
+.venv
+.env
+var
+node_modules
+web/node_modules
+web/dist
+output
+.playwright-cli
+.pytest_cache
+__pycache__
+imports

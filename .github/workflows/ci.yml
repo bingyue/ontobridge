@@ -1,0 +1,28 @@
+name: Verify OntoBridge
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --locked
+      - run: uv run ruff check backend tests scripts
+      - run: uv run pytest -q
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build
+      - name: MCP integration
+        run: |
+          uv run ontobridge > /tmp/ontobridge.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            curl --fail http://127.0.0.1:8787/api/health && break
+            sleep 1
+          done
+          uv run python scripts/mcp_smoke.py

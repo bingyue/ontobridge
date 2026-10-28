@@ -1,0 +1,23 @@
+[project]
+name = "ontobridge"
+version = "0.1.0"
+description = "Local-first legacy integration and manufacturing ontology platform"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "sqlalchemy>=2.0,<3", "psycopg[binary]>=3.2,<4", "mcp>=1.12,<2", "httpx>=0.28,<1"]
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["backend/ontobridge"]
+[project.scripts]
+ontobridge = "ontobridge.cli:main"
+ontobridge-mcp = "ontobridge.mcp_server:main"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 110
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+ignore = ["B008"]

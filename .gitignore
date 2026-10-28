@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+node_modules/
+web/dist/
+var/
+.env
+artifacts/
+.DS_Store
+.playwright-cli/
+output/
+imports/
+web/tsconfig.tsbuildinfo
