@@ -1,6 +1,6 @@
 # V1 部署与运维手册
 
-本手册对应 V1 验收候选代码；逐项结果见 [v1-status.md](v1-status.md)。当前试点只使用合成数据。真实企业试点需另行授权与对账。
+本手册对应已完成 mock 验收的 V1 代码；逐项结果见 [v1-status.md](v1-status.md)。当前试点只使用合成数据。真实企业试点需另行授权与对账。
 
 ## 进程和持久化
 
@@ -75,7 +75,7 @@ API/控制台、Local Gateway Worker、MCP Gateway 是三个独立进程。API �
 }
 ```
 
-来源配置只引用 `connection_ref: "erp-reader"`。`tables` 可限定表清单，`schema_name` 指定 PG schema/MSSQL schema。数据库主键必须是单列 PRIMARY KEY 或 UNIQUE；SQL Server 还检查目标表 INSERT/UPDATE/DELETE/ALTER/CONTROL 权限均不存在。所有数据库应使用来源端最小 SELECT 权限账号，驱动只读标记不能代替数据库授权。PostgreSQL/MySQL/SQLite 也启用只读事务/连接。
+来源配置只引用 `connection_ref: "erp-reader"`。`tables` 可限定表清单，`schema_name` 指定 PG schema/MSSQL schema。同步键必须具有全表单列 PRIMARY KEY 或 UNIQUE 约束/唯一索引；过滤（部分）唯一索引不满足要求。SQL Server 还检查目标表 INSERT/UPDATE/DELETE/ALTER/CONTROL 权限均不存在。所有数据库应使用来源端最小 SELECT 权限账号，驱动只读标记不能代替数据库授权。PostgreSQL/MySQL/SQLite 也启用只读事务/连接。
 
 CSV/XLSX/SQLite 放在 `imports/<tenant>/`，UI 路径相对该租户目录。拒绝越界路径与越界符号链接。XLSX 每个工作表是一张表，CSV 表名为文件 stem。SFTP 配置示例：
 
@@ -167,3 +167,19 @@ my_connector = "my_package:MyConnector"
 ```
 
 重启后注册表加载插件，UI 来源类型列表来自注册表，未知/冲突 kind 拒绝创建。凭据通过 `ConnectorContext.profile()` 获取租户专属配置；文件使用 `context.path()` 做边界校验。插件是可信部署代码，不支持通过浏览器上传执行。插件 read 必须仅 SELECT/read，稳定排序、明确 exhausted、返回可序列化 checkpoint，并提供真实 `source_updated_at` 与 `freshness_basis`。测试包含通过模拟 entry point 注册新类型后经公开 API 完成采集的用例。
+
+## 本机 SQL Server 验收环境
+
+Apple Silicon 上的功能验收使用独立 QEMU x86-64 全系统模拟。该环境只放合成表，不作为生产或性能基准；生产部署使用微软支持的 Linux x86-64 主机。已安装 Homebrew `qemu` 与 `lima-additional-guestagents`。VM 文件保留在 ExtSSD，运行/停止显式指定独立 profile，不切换默认 Docker context：
+
+```bash
+COLIMA_HOME=/Volumes/ExtSSD/ob-v1-vm \
+COLIMA_CACHE_HOME=/Volumes/ExtSSD/ob-v1-vm/cache \
+colima start --profile ontobridge-x86 --activate=false
+docker --context colima-ontobridge-x86 start ontobridge-v1-mssql
+DOCKER_CONTEXT=colima-ontobridge-x86 \
+uv run python scripts/v1_database_integration.py mssql --startup-timeout 1800
+COLIMA_HOME=/Volumes/ExtSSD/ob-v1-vm colima stop --profile ontobridge-x86
+```
+
+验收后已停止此专用 VM 以释放 CPU/内存，磁盘和容器保留。真实数据库连接回执位于 `var/v1-integration/*-receipt.json`，无凭据快照已收录到 `docs/v1-database-receipts.json`。脚本不会自动删除或替换退出的容器；先查看对应 context 的日志，再决定恢复。

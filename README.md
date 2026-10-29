@@ -2,7 +2,7 @@
 
 企业 AI 连接、本体映射与业务能力平台。将只读 ERP / MES / WMS 数据转为带来源证据、版本和权限的 REST API / MCP 工具。
 
-**当前为 V1 验收候选实现，使用用户确认的 mock 企业数据。** 三个工作台、独立采集 Worker、动态 MCP 网关均已实现；SQL Server 真机验收仍待 Linux x86-64 环境完成，尚不标记完整 V1 验收通过。逐项证据与限制见 [验收账本](docs/v1-status.md)，需求见 [V1 计划](docs/v1-plan.md)。
+**V1 开发及 mock 范围验收已完成。** 三个工作台、独立采集 Worker、动态 MCP 网关均已实现；PostgreSQL、MySQL、SQL Server 的真实数据库服务连接均通过合成数据验证。SQL Server 在完整 x86-64 模拟虚拟机中验证，真实企业试点和生产环境性能尚未验收。逐项证据与限制见 [验收账本](docs/v1-status.md)，需求见 [V1 计划](docs/v1-plan.md)。
 
 ## 本机运行与 mock 验收
 
@@ -80,6 +80,6 @@ uv run python scripts/v1_database_integration.py postgresql mysql
 uv run python scripts/v1_database_integration.py mssql
 ```
 
-数据库脚本只创建 `ontobridge-v1-*` 隔离合成服务，不接入企业数据库。SQL Server 的连接实现与 x86-64 CI 已提供，但本机 ARM 容器启动失败，不能把未运行的数据库测试算作通过。
+数据库脚本只创建 `ontobridge-v1-*` 隔离合成服务，不接入企业数据库。SQL Server 2022（16.0.4305.5）已在独立 x86-64 QEMU 虚拟机通过连接、结构发现、增量分页和权限验收。脚本额外核验数据库写拒绝错误码及过滤唯一索引边界；可复现步骤见运维手册。CI 已配置，尚未远程执行。
 
 当前版本采用 FastAPI/Pydantic/SQLAlchemy + React/TypeScript，PostgreSQL 或本机 SQLite 持久化，官方 TypeScript MCP SDK v2。附件推荐的框架、Redis/MinIO 被同等功能的持久化租约和文件存储替代，尚不支持大规模 CDC、多节点协调或生产系统回写。

@@ -132,14 +132,33 @@ class DatabaseConnector(Connector):
             if primary_key not in obj.c or (cursor and cursor["column"] not in obj.c):
                 raise DomainError("主键或增量字段不在来源结构中")
             # All cursors are keyset-based. Never use OFFSET, which can skip concurrent inserts.
-            unique_keys = [
-                set(c.get("column_names", []))
-                for c in inspect(conn).get_unique_constraints(table, schema=self.schema_name())
-            ]
+            inspector = inspect(conn)
+            kind = self.context.source["kind"]
+            # MSSQL reflects UNIQUE constraints as indexes; its constraint API is unimplemented.
+            constraints = (
+                [] if kind == "mssql" else inspector.get_unique_constraints(table, schema=self.schema_name())
+            )
+            unique_keys = [set(c.get("column_names", [])) for c in constraints]
+            indexes = inspector.get_indexes(table, schema=self.schema_name())
+            if kind == "mssql":
+                # Read-only users may not see filter_definition. Check has_filter directly,
+                # since a filtered unique index does not guarantee uniqueness of every row.
+                preparer = conn.dialect.identifier_preparer
+                qualified = f"{preparer.quote(self.schema_name() or 'dbo')}.{preparer.quote(table)}"
+                unfiltered = set(
+                    conn.execute(
+                        text(
+                            "SELECT name FROM sys.indexes WHERE object_id=OBJECT_ID(:object) "
+                            "AND is_unique=1 AND has_filter=0 AND is_disabled=0"
+                        ),
+                        {"object": qualified},
+                    ).scalars()
+                )
+                indexes = [index for index in indexes if index["name"] in unfiltered]
             unique_keys += [
                 set(c.get("column_names", []))
-                for c in inspect(conn).get_indexes(table, schema=self.schema_name())
-                if c.get("unique")
+                for c in indexes
+                if c.get("unique") and not any(key.endswith("_where") for key in c.get("dialect_options", {}))
             ]
             unique_keys.append({c.name for c in obj.primary_key})
             if {primary_key} not in unique_keys:

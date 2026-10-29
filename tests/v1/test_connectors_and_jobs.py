@@ -113,6 +113,20 @@ def test_atomic_promotion_and_equal_watermark_updates(platform):
     assert execute(app, client, p)["changed"] == 0
 
 
+def test_sync_key_requires_global_uniqueness(platform):
+    app, client, folder = platform
+    with sqlite3.connect(folder / "erp.sqlite") as db:
+        db.execute("CREATE UNIQUE INDEX partial_watermark ON orders(updated) WHERE id IN (2,3,4)")
+        db.execute("CREATE UNIQUE INDEX unique_customer ON orders(customer)")
+    source, _ = pipeline(app, client)
+    connector = DatabaseConnector(ConnectorContext(app.state.source_root, "factory", source))
+    with pytest.raises(DomainError, match="单列 PRIMARY KEY 或 UNIQUE"):
+        connector.read("orders", "updated", 2)
+    first = connector.read("orders", "customer", 2)
+    second = connector.read("orders", "customer", 10, checkpoint=first.checkpoint)
+    assert [row["customer"] for row in first.rows + second.rows] == ["A", "B", "C", "D", "E"]
+
+
 def test_worker_restart_resume_and_exclusive_lease(platform):
     app, client, folder = platform
     _, p = pipeline(app, client)

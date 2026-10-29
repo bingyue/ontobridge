@@ -1,13 +1,13 @@
 # V1.0 范围与验收账本
 
-更新：2026-10-29。范围以 [v1-plan.md](v1-plan.md) 为准。用户确认“暂时 mock”：企业 ERP/MES/模型试点使用合成环境；完整 V1 软件范围不缩减。当前为 **V1 验收候选**，SQL Server 真实服务验证尚未通过，不能宣布全部 V1 完成。
+更新：2026-10-29。范围以 [v1-plan.md](v1-plan.md) 为准。用户确认“暂时 mock”：企业 ERP/MES/模型试点使用合成环境；完整 V1 软件范围不缩减。当前 **V1 开发及 mock 范围验收已完成**。三种真实数据库服务均通过合成数据集成验证；SQL Server 使用完整 x86-64 模拟虚拟机，企业试点及生产性能不在本次完成声明内。
 
 ## 功能及证据
 
 | ID | 实现及验证证据 | 当前状态 |
 |---|---|---|
 | CON-01 | Connector SPI/entry point 注册；新 kind 经公开 API→发现→Worker 采集，`test_installed_entrypoint_connector_is_usable_via_public_api` | 已通过 |
-| CON-02 | PostgreSQL16/MySQL8.4 真实容器：类型/主键、相同水位分页、只读 DELETE 拒绝；MSSQL 驱动与权限检查已实现，x86-64 CI 已配置 | **SQL Server 待验证** |
+| CON-02 | PostgreSQL16/MySQL8.4/SQL Server2022 真实服务：类型/主键、相同水位分页、DELETE 精确权限错误码；MSSQL 高权限账号拒绝及唯一/过滤索引检查 | 已通过（SQL Server 使用 x86-64 全系统模拟） |
 | CON-03 | API/控制台表、字段、类型、主键、样例；连接成功/失败审计 | 已通过 |
 | CON-04 | CSV/XLSX 真实文件，公式/路径/指纹边界；真实本地 SSH/SFTP 服务、固定 host key、错主机拒绝 | 已通过 |
 | CON-05 | 全量删除对账、增量双键游标、边界重放；未完成 staging 不可见；独立 Worker 重启/并发租约/重试耗尽 | 已通过 |
@@ -33,22 +33,25 @@
 
 ## 本次实际运行
 
-- `uv run pytest -q`：**47 passed**；覆盖基础规则、连接器、Worker、真实浏览器/SFTP、本体、能力与权限。FastAPI TestClient 的 httpx 弃用提示不影响测试结果。
+- `uv run pytest -q`：**48 passed**；覆盖基础规则、连接器、Worker、真实浏览器/SFTP、本体、能力与权限。FastAPI TestClient 的 httpx 弃用提示不影响测试结果。
 - `uv run ruff check backend tests scripts`：通过。
 - `npm --prefix web run build`：通过。当前主 bundle 约538KB，存在 Vite 大包提示，尚未做按工作台拆包。
 - `npm --prefix gateway test`：**3 passed**，官方新旧客户端及协议错误处理。
-- `uv run python scripts/v1_database_integration.py postgresql mysql`：两个真实数据库均通过；使用随机只读账号和合成 ERP 表。
+- `uv run python scripts/v1_database_integration.py postgresql mysql`：两个真实数据库均通过；使用随机只读账号和合成 ERP 表，写入分别收到 `25006` / `1142`。
+- `DOCKER_CONTEXT=colima-ontobridge-x86 uv run python scripts/v1_database_integration.py mssql --startup-timeout 1800`：**通过**；SQL Server 2022 `16.0.4305.5`，写入收到 `229`，拒绝有写权限的 `sa` 来源账号；普通唯一索引分页成功，过滤唯一索引拒绝作为全表同步键。
 - `uv run python scripts/v1_mock_acceptance.py` + `node gateway/pilot-check.mjs`：本机独立进程端到端通过。
 - `uv run python scripts/v1_container_acceptance.py`：私有模式、独立 PostgreSQL/API/Worker/MCP、发布后重启恢复、非 root Linux Chromium **通过**。API 18787 / MCP 18790。
 - `uv run python scripts/v1_browser_acceptance.py`：私有工程师/访客登录、三个工作台、7 个可见图谱节点、会话刷新和 390px 手机宽度通过，零 pageerror。修复了私有模式旧告警字段造成的白屏；本体节点拖拽保存及能力真实调用也已在浏览器核对。截图位于忽略目录 `output/playwright/`。
 
-验收记录保存在 `var/v1-console/acceptance.json`、`var/container-acceptance/receipt.json`；它们只包含合成结果，不包含令牌。源码、锁文件、测试、构建及验收脚本均在仓库中。凭据位于忽略目录及 0600 文件。
+无凭据的三库回执快照见 [v1-database-receipts.json](v1-database-receipts.json)。验收记录保存在 `var/v1-console/acceptance.json`、`var/container-acceptance/receipt.json`；它们只包含合成结果，不包含令牌。源码、锁文件、测试、构建及验收脚本均在仓库中。凭据位于忽略目录及 0600 文件。
 
-## 尚未完成的验证
+## 验证环境与未覆盖范围
 
-**SQL Server**：本机为 Apple Silicon / ARM64，SQL Server 2022 amd64 容器在当前 QEMU 环境因地址映射限制启动即退出；独立 Rosetta VM 创建失败后已删除，只清理本任务创建的失败 VM。没有修改默认 Colima 或其他项目容器。失败证据在 `output/runtime/sqlserver-vm-failure.log`。
+SQL Server 最初在 ARM 主机的容器级翻译环境因地址映射失败。后续在独立 Colima/QEMU **完整 x86-64 虚拟机**启动真实 SQL Server 服务并完成验收；VM 磁盘位于 `/Volumes/ExtSSD/ob-v1-vm`，默认 Docker context 与其他项目保持不变。
 
-微软仅支持在 Linux Intel/AMD x86-64 上运行 SQL Server 容器，模拟/翻译环境不属于受支持测试环境，参见[官方部署说明](https://learn.microsoft.com/en-us/sql/linux/sql-server-linux-docker-container-deployment?view=sql-server-ver17)。`.github/workflows/ci.yml` 已添加三种数据库的独立 x86-64 验收任务，但尚未远程运行，**配置 CI 不等于测试已通过**。在对应环境运行 `uv run python scripts/v1_database_integration.py mssql` 后补齐该项。
+这次真实服务验证发现并修复了 SQLAlchemy MSSQL 方言不实现 `get_unique_constraints` 导致的增量读取故障：改用主键与全表唯一索引；同时拒绝过滤唯一索引，避免游标跳过重复记录。SQLite 回归测试与真实 SQL Server 检查均覆盖该边界。
+
+微软仅支持在 Linux Intel/AMD x86-64 上运行 SQL Server 容器，模拟/翻译环境不属于受支持的生产部署，参见[官方部署说明](https://learn.microsoft.com/en-us/sql/linux/sql-server-linux-docker-container-deployment?view=sql-server-ver17)。本次结果证明连接功能，不宣称原生硬件兼容认证或生产性能。`.github/workflows/ci.yml` 已配置三库 x86-64 验收任务，但尚未远程运行。
 
 真实企业网络、账号、业务字段、产能/库存口径和大规模性能尚未验收；用户当前明确选择 mock，未对真实 ERP/MES 进行任何采集。真实 LLM 由管理员配置后另行测评，不把合成模型 HTTP 测试宣称为模型效果验证。
 

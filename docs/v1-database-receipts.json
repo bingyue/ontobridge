@@ -1,0 +1,78 @@
+{
+  "scope": "Real database services, synthetic ERP data; SQL Server in full-system QEMU x86_64 VM, not a production/performance certification.",
+  "sqlserver_version": "16.0.4305.5",
+  "receipts": [
+    {
+      "synthetic_fixture": true,
+      "database_kind": "postgresql",
+      "verified_at": "2026-10-29T05:25:12.783938+00:00",
+      "docker_context": "colima",
+      "docker_architecture": "aarch64",
+      "primary_key": [
+        "id"
+      ],
+      "column_types": {
+        "id": "INTEGER",
+        "customer": "TEXT",
+        "updated": "INTEGER"
+      },
+      "row_ids": [
+        1,
+        2,
+        3
+      ],
+      "write_denied_error_code": "25006",
+      "write_capable_account_rejected": null,
+      "unique_and_filtered_index_checked": null,
+      "passed": true
+    },
+    {
+      "synthetic_fixture": true,
+      "database_kind": "mysql",
+      "verified_at": "2026-10-29T05:25:13.512460+00:00",
+      "docker_context": "colima",
+      "docker_architecture": "aarch64",
+      "primary_key": [
+        "id"
+      ],
+      "column_types": {
+        "id": "INTEGER",
+        "customer": "VARCHAR(100)",
+        "updated": "INTEGER"
+      },
+      "row_ids": [
+        1,
+        2,
+        3
+      ],
+      "write_denied_error_code": 1142,
+      "write_capable_account_rejected": null,
+      "unique_and_filtered_index_checked": null,
+      "passed": true
+    },
+    {
+      "synthetic_fixture": true,
+      "database_kind": "mssql",
+      "verified_at": "2026-10-29T05:25:25.181719+00:00",
+      "docker_context": "colima-ontobridge-x86",
+      "docker_architecture": "x86_64",
+      "primary_key": [
+        "id"
+      ],
+      "column_types": {
+        "id": "INTEGER",
+        "customer": "NVARCHAR(100) COLLATE \"SQL_Latin1_General_CP1_CI_AS\"",
+        "updated": "INTEGER"
+      },
+      "row_ids": [
+        1,
+        2,
+        3
+      ],
+      "write_denied_error_code": 229,
+      "write_capable_account_rejected": true,
+      "unique_and_filtered_index_checked": true,
+      "passed": true
+    }
+  ]
+}

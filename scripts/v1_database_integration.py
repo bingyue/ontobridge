@@ -8,8 +8,10 @@ import os
 import secrets
 import subprocess
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
+from ontobridge.service import DomainError
 from ontobridge.v1.connector_sdk import ConnectorContext
 from ontobridge.v1.db_connector import DatabaseConnector
 from sqlalchemy import text
@@ -91,13 +93,13 @@ def sql(kind, name, query):
         command = [
             "sh",
             "-c",
-            'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b',
+            'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -I -b -l 5 -t 15',
         ]
     return docker(["exec", "-i", name, *command], input=query, check=False)
 
 
-def provision(kind, name, reader):
-    deadline = time.monotonic() + 180
+def provision(kind, name, reader, startup_timeout=180):
+    deadline = time.monotonic() + startup_timeout
     while True:
         state = docker(["inspect", name, "--format", "{{.State.Status}}"]).stdout.strip()
         if state != "running":
@@ -136,6 +138,8 @@ IF OBJECT_ID('orders') IS NULL CREATE TABLE orders (id INT PRIMARY KEY, customer
 TRUNCATE TABLE orders;
 INSERT INTO orders VALUES (1,'Mock A',10),(2,'Mock B',10),(3,'Mock C',11);
 IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name='obr_reader') CREATE LOGIN obr_reader WITH PASSWORD='{reader}';
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='unique_customer' AND object_id=OBJECT_ID('orders')) CREATE UNIQUE INDEX unique_customer ON orders(customer);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='partial_watermark' AND object_id=OBJECT_ID('orders')) CREATE UNIQUE INDEX partial_watermark ON orders(updated) WHERE id > 1;
 IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name='obr_reader') CREATE USER obr_reader FOR LOGIN obr_reader;
 ALTER ROLE db_datareader ADD MEMBER obr_reader;
 GO
@@ -145,7 +149,7 @@ GO
         raise RuntimeError("Fixture provisioning failed: " + result.stderr[-400:])
 
 
-def verify(kind, reader):
+def verify(kind, reader, admin_password=None):
     profile = {
         "kind": kind,
         "host": "127.0.0.1",
@@ -161,6 +165,11 @@ def verify(kind, reader):
     connector = DatabaseConnector(ConnectorContext(STATE, "mock-factory", source, profiles))
     schema = connector.discover()[0]
     assert schema.primary_key == ["id"]
+    columns = {column.name: column for column in schema.columns}
+    assert set(columns) == {"id", "customer", "updated"}
+    assert all("INT" in columns[name].type.upper() for name in ("id", "updated"))
+    assert any(part in columns["customer"].type.upper() for part in ("CHAR", "TEXT"))
+    assert all(not column.nullable for column in columns.values())
     cursor = {"column": "updated", "tie_breaker": "id", "kind": "integer"}
     first = connector.read("orders", "id", 2, cursor)
     second = connector.read("orders", "id", 2, cursor, first.checkpoint)
@@ -169,11 +178,57 @@ def verify(kind, reader):
     try:
         with connector.connection() as connection:
             connection.execute(text("DELETE FROM orders"))
-    except Exception:
-        pass
+    except DomainError as exc:
+        original = getattr(exc.__cause__, "orig", None)
+        error_code = (
+            getattr(original, "sqlstate", None)
+            if kind == "postgresql"
+            else original.args[0]
+            if original and original.args
+            else None
+        )
+        expected = {"postgresql": {"25006", "42501"}, "mysql": {1142, 1792}, "mssql": {229}}
+        assert error_code in expected[kind], "DELETE failed for an unexpected reason, not proven read-only"
     else:
         raise AssertionError("read-only account unexpectedly allowed DELETE")
     assert len(connector.read("orders", "id", 10).rows) == 3
+    if kind == "mssql":
+        unique_page = connector.read("orders", "customer", 2)
+        unique_rest = connector.read("orders", "customer", 2, checkpoint=unique_page.checkpoint)
+        assert [r["id"] for r in unique_page.rows + unique_rest.rows] == [1, 2, 3]
+        try:
+            connector.read("orders", "updated", 2)
+        except DomainError as exc:
+            assert exc.status == 422 and "单列 PRIMARY KEY 或 UNIQUE" in exc.message
+        else:
+            raise AssertionError("Filtered unique index cannot prove global key uniqueness")
+        assert admin_password is not None
+        elevated = {"mock-factory": {kind: {**profile, "username": "sa", "password": admin_password}}}
+        try:
+            DatabaseConnector(ConnectorContext(STATE, "mock-factory", source, elevated)).discover()
+        except DomainError as exc:
+            assert exc.status == 403, "Writable source account was not rejected by the permission gate"
+        else:
+            raise AssertionError("SQL Server source unexpectedly accepted a write-capable account")
+    (STATE / (kind + "-receipt.json")).write_text(
+        json.dumps(
+            {
+                "synthetic_fixture": True,
+                "database_kind": kind,
+                "verified_at": datetime.now(UTC).isoformat(),
+                "docker_context": docker(["context", "show"]).stdout.strip(),
+                "docker_architecture": docker(["info", "--format", "{{.Architecture}}"]).stdout.strip(),
+                "primary_key": schema.primary_key,
+                "column_types": {name: column.type for name, column in columns.items()},
+                "row_ids": [r["id"] for r in first.rows + second.rows],
+                "write_denied_error_code": error_code,
+                "write_capable_account_rejected": True if kind == "mssql" else None,
+                "unique_and_filtered_index_checked": True if kind == "mssql" else None,
+                "passed": True,
+            },
+            indent=2,
+        )
+    )
     print(
         f"{kind}: PASS real connection, type/PK discovery, tie-safe incremental pages, source write rejection"
     )
@@ -188,12 +243,15 @@ def verify(kind, reader):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("kinds", nargs="+", choices=["postgresql", "mysql", "mssql"])
+    parser.add_argument("--startup-timeout", type=int, default=180)
     args = parser.parse_args()
+    if not 30 <= args.startup_timeout <= 1800:
+        parser.error("--startup-timeout must be between 30 and 1800 seconds")
     credentials = settings()
     for kind in args.kinds:
         name = start(kind, credentials[kind])
-        provision(kind, name, credentials["reader"])
-        verify(kind, credentials["reader"])
+        provision(kind, name, credentials["reader"], args.startup_timeout)
+        verify(kind, credentials["reader"], credentials[kind])
 
 
 if __name__ == "__main__":
