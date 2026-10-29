@@ -295,43 +295,37 @@ def test_new_csv_connector_mapping_and_collision(platform):
 
 def test_persistence_and_isolation(tmp_path):
     token = "test-only-token-of-sufficient-length"
-    credentials = {token: {"user": "reader", "role": "viewer", "tenant": "company-a"}}
+    credentials = {token: {"user": "engineer", "role": "operator", "tenant": "company-a"}}
     app = create_app(tmp_path, demo=False, credentials=credentials)
     with app.state.store.transaction("company-b") as tx:
-        tx.put("source", "secret-source", {"id": "secret-source", "name": "company-b secret"})
+        tx.put("v1_source", "secret-source", {"id": "secret-source", "name": "company-b secret"})
     with TestClient(app) as client:
         headers = {"Authorization": "Bearer " + token}
-        assert client.get("/api/sources", headers=headers).json() == []
-        assert client.get("/api/ontology", headers=headers).json()["objects"] == []
+        assert client.get("/api/v1/sources", headers=headers).json() == []
+        assert client.get("/api/v1/ontologies", headers=headers).json() == []
         assert client.post("/api/demo-session/operator").status_code == 404
     app2 = create_app(tmp_path, demo=False, credentials=credentials)
     with app2.state.store.transaction("company-b") as tx:
-        assert tx.get("source", "secret-source")["name"] == "company-b secret"
+        assert tx.get("v1_source", "secret-source")["name"] == "company-b secret"
     app2.state.store.engine.dispose()
     with pytest.raises(RuntimeError):
         create_app(tmp_path, demo=False, credentials={})
 
 
-def test_admin_cannot_approve_own_draft(tmp_path):
-    from ontobridge.demo import seed
-
+def test_admin_cannot_publish_own_ontology_draft(tmp_path):
     token = "admin-token-for-self-approval-test"
     app = create_app(
         tmp_path, demo=False, credentials={token: {"user": "admin-user", "role": "admin", "tenant": "demo"}}
     )
-    seed(app.state.store, app.state.source_root)
     with TestClient(app) as client:
         client.headers["Authorization"] = "Bearer " + token
-        action = client.post(
-            "/api/capabilities/propose_schedule_change/call",
-            json={"order_id": "SO-2026-0088", "note": "管理员申请调整", "idempotency_key": "admin-test-key"},
-        ).json()["result"]
-        response = client.post(
-            "/api/actions/" + action["id"] + "/decision",
-            json={"decision": "approve", "reason": "管理员自行审核"},
+        spec = client.get("/api/v1/ontology-template").json()
+        ontology = client.post("/api/v1/ontologies", json=spec).json()
+        assert (
+            client.post("/api/v1/ontologies/" + ontology["id"] + "/publish", json={"revision": 1}).status_code
+            == 403
         )
-        assert response.status_code == 403
-        assert client.get("/api/actions").json()[0]["status"] == "pending_approval"
+        assert client.get("/api/v1/ontologies").json()[0]["active_version"] is None
 
 
 def test_csv_schema_and_size_bounds(platform):

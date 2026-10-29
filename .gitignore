@@ -12,4 +12,5 @@ artifacts/
 .playwright-cli/
 output/
 imports/
+config/
 web/tsconfig.tsbuildinfo

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
@@ -53,8 +54,13 @@ def create_app(data_dir=None, demo=None, credentials=None, db_url=None):
             or not principal.get("user")
         ):
             raise RuntimeError("令牌至少 24 位，且必须包含 user、tenant、role")
-    if len({p["tenant"] for p in credentials.values()}) > 1:
-        raise RuntimeError("一个本地网关仅允许一个租户，请为不同企业部署独立网关与来源目录")
+    from .v1.access import DataPolicy, restricted_path_allowed
+
+    for principal in credentials.values():
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", principal["tenant"]):
+            raise RuntimeError("租户标识只允许字母、数字、连字符和下划线")
+        if "data_policy" in principal:
+            principal["data_policy"] = DataPolicy.model_validate(principal["data_policy"]).model_dump()
     if demo and credentials:
         raise RuntimeError("演示模式不接受真实凭据，请关闭 ONTOBRIDGE_DEMO")
     store = Store(
@@ -117,6 +123,18 @@ def create_app(data_dir=None, demo=None, credentials=None, db_url=None):
         principal = next((p for key, p in token_map.items() if secrets.compare_digest(key, token)), None)
         if not principal:
             raise HTTPException(401, "需要有效访问令牌")
+        restricted = principal.get("data_policy") is not None
+        legacy = (
+            request.url.path.startswith("/api/")
+            and not request.url.path.startswith("/api/v1/")
+            and request.url.path not in ("/api/me",)
+        )
+        if (restricted and not restricted_path_allowed(request.url.path, request.method)) or (
+            not demo and legacy
+        ):
+            with store.transaction(principal["tenant"]) as tx:
+                tx.audit(principal["user"], "access.denied", "data_policy", {"path": request.url.path})
+            raise DomainError("当前凭据仅允许通过已发布能力访问授权数据", 403)
         return principal
 
     def permit(principal, *roles):
@@ -147,7 +165,11 @@ def create_app(data_dir=None, demo=None, credentials=None, db_url=None):
 
     @app.get("/api/me")
     def me(p=Depends(auth)):
-        return p
+        return {
+            **p,
+            "legacy_access": demo and p.get("data_policy") is None,
+            "capability_only": p.get("data_policy") is not None,
+        }
 
     @app.get("/api/overview")
     def overview(p=Depends(auth)):
@@ -413,6 +435,10 @@ def create_app(data_dir=None, demo=None, credentials=None, db_url=None):
                     "max_rows": 10000,
                 },
             }
+
+    from .v1.api import install
+
+    install(app, store, root, auth, permit)
 
     dist = Path(__file__).resolve().parents[2] / "web" / "dist"
     if dist.exists():

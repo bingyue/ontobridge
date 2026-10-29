@@ -10,3 +10,6 @@ output
 .pytest_cache
 __pycache__
 imports
+
+**/node_modules
+gateway/.env

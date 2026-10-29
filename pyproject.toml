@@ -3,7 +3,20 @@ name = "ontobridge"
 version = "0.1.0"
 description = "Local-first legacy integration and manufacturing ontology platform"
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "sqlalchemy>=2.0,<3", "psycopg[binary]>=3.2,<4", "mcp>=1.12,<2", "httpx>=0.28,<1"]
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+    "sqlalchemy>=2.0,<3",
+    "psycopg[binary]>=3.2,<4",
+    "mcp>=1.12,<2",
+    "httpx>=0.28,<1",
+    "pymysql[rsa]>=1.1,<2",
+    "pymssql>=2.3,<3",
+    "openpyxl>=3.1,<4",
+    "paramiko>=3.5,<5",
+    "playwright>=1.50,<2",
+    "jsonschema>=4.23,<5",
+]
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
 [build-system]
@@ -14,6 +27,8 @@ packages = ["backend/ontobridge"]
 [project.scripts]
 ontobridge = "ontobridge.cli:main"
 ontobridge-mcp = "ontobridge.mcp_server:main"
+ontobridge-worker = "ontobridge.v1.worker:main"
+ontobridge-record = "ontobridge.v1.recorder:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 [tool.ruff]

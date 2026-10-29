@@ -40,11 +40,17 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./style.css";
+import IntegrationStudio from "./IntegrationStudio";
+import OntologyStudio from "./OntologyStudio";
+import CapabilityFactory from "./CapabilityFactory";
 
 type Json = any;
 type Page =
   | "overview"
   | "sources"
+  | "integration"
+  | "ontologyStudio"
+  | "factory"
   | "mappings"
   | "ontology"
   | "capabilities"
@@ -52,7 +58,25 @@ type Page =
   | "operations";
 const nav: { id: Page; label: string; en: string; icon: typeof Database }[] = [
   { id: "overview", label: "工作总览", en: "Overview", icon: LayoutDashboard },
-  { id: "sources", label: "数据源连接", en: "Connectors", icon: Database },
+  { id: "sources", label: "样例数据源", en: "Connectors", icon: Database },
+  {
+    id: "integration",
+    label: "连接器设计器",
+    en: "Connector Studio",
+    icon: Workflow,
+  },
+  {
+    id: "ontologyStudio",
+    label: "本体映射工作台",
+    en: "Ontology Studio",
+    icon: GitBranch,
+  },
+  {
+    id: "factory",
+    label: "业务能力工厂",
+    en: "Capability Factory",
+    icon: Boxes,
+  },
   { id: "mappings", label: "语义映射", en: "Mapping", icon: GitBranch },
   { id: "ontology", label: "业务本体", en: "Ontology", icon: Network },
   { id: "capabilities", label: "AI 业务能力", en: "Capabilities", icon: Boxes },
@@ -228,6 +252,26 @@ function App() {
     return value;
   }
   async function refresh(t = token) {
+    const identity = await api("/me", undefined, t);
+    setPrincipal(identity);
+    if (identity.legacy_access === false) {
+      setData({
+        overview: { orders: [], warnings: [], runs: [], pending_actions: 0 },
+        sources: [],
+        mappings: [],
+        ontology: { entities: [], relations: [], objects: [], issues: [] },
+        capabilities: [],
+        actions: [],
+        operations: {},
+      });
+      setPage((previous) =>
+        ["integration", "ontologyStudio", "factory"].includes(previous) &&
+        !identity.capability_only
+          ? previous
+          : "factory",
+      );
+      return;
+    }
     const [
       overview,
       sources,
@@ -305,7 +349,9 @@ function App() {
     }
   }, [toast]);
   const navigate = (next: Page) => {
-    setPage(next);
+    setPage(principal?.legacy_access === false && (
+      principal.capability_only || !["integration", "ontologyStudio", "factory"].includes(next)
+    ) ? "factory" : next);
     setSearch("");
     setError("");
   };
@@ -496,23 +542,33 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE / 工作台</div>
         <nav>
-          {nav.map((n) => (
-            <button
-              key={n.id}
-              aria-label={n.label}
-              title={n.label}
-              onClick={() => navigate(n.id)}
-              className={page === n.id ? "active" : ""}
-            >
-              <n.icon size={19} />
-              <span>{n.label}</span>
-              {n.id === "actions" && overview.pending_actions > 0 ? (
-                <b className="nav-count">{overview.pending_actions}</b>
-              ) : (
-                n.id === "overview" && <span className="nav-dot" />
-              )}
-            </button>
-          ))}
+          {nav
+            .filter(
+              (n) =>
+                principal.legacy_access !== false ||
+                (principal.capability_only
+                  ? n.id === "factory"
+                  : ["integration", "ontologyStudio", "factory"].includes(
+                      n.id,
+                    )),
+            )
+            .map((n) => (
+              <button
+                key={n.id}
+                aria-label={n.label}
+                title={n.label}
+                onClick={() => navigate(n.id)}
+                className={page === n.id ? "active" : ""}
+              >
+                <n.icon size={19} />
+                <span>{n.label}</span>
+                {n.id === "actions" && overview.pending_actions > 0 ? (
+                  <b className="nav-count">{overview.pending_actions}</b>
+                ) : (
+                  n.id === "overview" && <span className="nav-dot" />
+                )}
+              </button>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="gateway-indicator">
@@ -617,6 +673,12 @@ function App() {
               <p>
                 {
                   {
+                    factory:
+                      "从批准本体生成契约，测试并发布 Agent 可调用的业务能力。",
+                    ontologyStudio:
+                      "从映射候选到统一身份，校验并发布可追溯的本体版本。",
+                    integration:
+                      "配置来源与同步任务，以可追溯的数据资产连接三个工作台。",
                     overview:
                       "从遗留系统到 AI Agent，一览企业业务连接的完整链路。",
                     sources:
@@ -1009,6 +1071,19 @@ function App() {
                 </div>
               </div>
             </>
+          )}
+          {page === "factory" && (
+            <CapabilityFactory api={api} principal={principal} />
+          )}
+          {page === "ontologyStudio" && (
+            <OntologyStudio api={api} principal={principal} />
+          )}
+          {page === "integration" && (
+            <IntegrationStudio
+              api={api}
+              principal={principal}
+              demo={config.demo}
+            />
           )}
           {page === "sources" && (
             <>

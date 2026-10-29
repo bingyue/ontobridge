@@ -15,9 +15,12 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: uv sync --locked
       - run: uv run ruff check backend tests scripts
+      - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -q
       - run: npm --prefix web ci
       - run: npm --prefix web run build
+      - run: npm --prefix gateway ci
+      - run: npm --prefix gateway test
       - name: MCP integration
         run: |
           uv run ontobridge > /tmp/ontobridge.log 2>&1 &
@@ -26,3 +29,38 @@ jobs:
             sleep 1
           done
           uv run python scripts/mcp_smoke.py
+
+  database-connectors:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgresql, mysql, mssql]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - run: uv sync --locked
+      - name: Real server with isolated synthetic ERP fixture
+        run: uv run python scripts/v1_database_integration.py ${{ matrix.database }}
+
+  private-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: uv sync --locked
+      - run: uv run playwright install --with-deps chromium
+      - run: npm --prefix gateway ci
+      - run: docker compose build console mcp
+        env:
+          ONTOBRIDGE_TOKENS: '{}'
+          POSTGRES_PASSWORD: build-only-placeholder
+      - run: uv run python scripts/v1_container_acceptance.py
+      - run: uv run python scripts/v1_browser_acceptance.py
